@@ -3,243 +3,215 @@ classdef boid
     %   Detailed explanation goes here
     
     properties (Access = public) % validate every input
-        birthday datetime = date
-        geometry %?
+        dimNumber (1,1) double {mustBeNonnegative} = 521
+        birdNumber (1,1) double {mustBeNonnegative} = 321
+        speedLimit (1,1) double {mustBeNonnegative} = 30 %{mustBeBetween(speedLimit, [0,50])} = 30 
+        centreOfMass (1,3) {mustBeNumeric} = 0
+        velocityCentre (1,3) {mustBeNumeric} = 0
+        predPos (1,3) {mustBeNumeric} = [0 0 0]        
+        wind (1,3) {mustBeNumeric} = [0 0 0]  
+        name = 'Calimero'
+        distance = 0
+        elevation = 0
+    end
+    
+    properties (GetAccess = public)
+        position = [0 0 0]
+        velocity = [0 0 0]
+    end
         
-        speed (1,1) double %{mustBePositive} = 0
-        speedLimit %must be between
-        velocity = [0,0,0]
-        position (1,3) %?
-        
-        pc = 0
-        pv = 0
-        factorRule1 = 10
-        factorRule2 = 20
-        factorRule3 = 8
-        
-        wind = [0 0 0]
-        danger = [0 0 0]
-        
+    properties (Access = protected)         
+        perceivedCentre = 0 
+        perceivedVelocity= 0
+        danger = 0
+
         v1 = 0
         v2 = 0
-        v3 = 0
+        v3 = 0        
 
-        w1 = 1
-        w2 = 1
-        w3 = 1
-    end
-    
-    properties (Access = public) %private
+        w1 = 2 %4.5 bij w5 = 60
+        w2 = 1 %1
+        w3 = 4 %3 % 5 bij w4 = 0
+        w4 = 1 %0.5
+        w5 = 0 %60 %1.5        
         
+        perching = false
+        groundLevel = 70        
+        perchTimer = 50
+        landing = 0
+        timeToAct = 50
     end
     
-    properties (Dependent)
-        amount
+    properties (Constant)
+        factorRule1 = 10 
+        factorRule2 = 10
+        factorRule3 = 8
+        factorDanger = 1
+        bounding = 5 %25 %1.3 bij exp % 3 bij w3 = 4 en w4 = 0 
     end
     
     methods
-        function obj = boid(birthday,geometry, speedLimit,windStream) %allow overloading, bird =?
+        function obj = boid(birdNumber,side,speedLimit,wind,hunter,windVelocity) %allow overloading, bird =?
             %UNTITLED Construct an instance of this class
             %   Detailed explanation goes here
-            % Add if nargin = 1
-            % obj.birthday = birthday
-            % Add if nargin = 3
-            % Ask questions here?
-            obj.birthday = birthday;
-            obj.geometry = geometry;
-            obj.position = obj.geometry * rand(1,3);
-            obj.speedLimit = speedLimit;
-            obj.speed = speedLimit * rand(); 
-            
-            % Initialise a random wind, which will be adjusted during the
-            % loop
-%             windStream = speedLimit/100 + ((rand(1,3) > 0.5)*2 - 1) * speedLimit/2 .* rand(1,3);
-            obj.wind = windStream;
-        end
-        
-        function amount = get.amount(obj)
-            %METHOD1 Summary of this method goes here
-            %   Detailed explanation goes here
-            amount = 230 - (obj{1}.birthday.Day+obj{1}.birthday.Month+obj{1}.birthday.Year);
-            if obj{1}.birthday.Year > 1999
-                amount = amount + 2000;
-            else
-                amount = amount + 1900;
+            if nargin == 6
+                obj.birdNumber = birdNumber;
+                obj.dimNumber = side;
+                obj.speedLimit = speedLimit;
+                if ~wind
+                    obj.w4 = 0;
+                else
+                    obj.wind = windVelocity;
+                end
+                if ~hunter
+                    obj.w5 = 0;
+                end
             end
+            obj.position = obj.dimNumber/2 + obj.dimNumber/2 * rand(1,3);
+            obj.wind = ((rand(1,3) > 0.5)*2 - 1) .* obj.speedLimit/4 .* rand(1,3); %speedLimit/8 + ((rand(1,3) > 0.5)*2 - 1) * speedLimit/2 .* rand(1,3);
+            names = {'Calimero','Benjamin','Niels','Coco','Kiwi','Tweety','Sky','Angel','Pray'};
+            obj.name = names{randi(numel(names))};
         end
         
-        function obj = move(obj) %obj is all objects?
-            
-            %obj.v1 = rule1(obj); % make this property?
-            obj = rule1(obj);
-            obj = rule2(obj);
-            obj = rule3(obj);
-            obj = windy(obj);
-            
-            %display(obj{1}.wind)
-    
-            for b = 1:obj{1}.amount % b = obj
-                bird = obj{b};
-%                 a = obj{b}.wind;
-%                 c = obj{b}.speedLimit;
-%                 bird.wind = windy(obj);
+        function mustBeBetween(a,b)
+           if (a < b(1)) || (a > b(2))
+                error(['Assigned value out of the range between',num2str(b(1)),num2str(b(2))])
+           end
+        end 
 
-                w1 = obj{b}.w1; %#ok<*PROP>
-                w2 = obj{b}.w2;
-                w3 = obj{b}.w3;
-                bird.velocity = bird.velocity + w1 * bird.v1 + w2*bird.v2 + w3*bird.v3 + 0.2 * bird.wind + bird.danger;
-                bird.velocity = boundPosition(bird); %update similar to rule2
-                bird.velocity = limitVelocity(bird);
-                bird.position = bird.position + bird.velocity;
+        function bird = move(flock,bird)
+            perching = bird.perching; %#ok<*PROPLC>            
+            if ~perching
+                bird.v1 = rule1(bird);
+                bird.v2 = rule2(flock,bird);
+                bird.v3 = rule3(bird);
                 
-                obj{b} = bird;
+                bird.danger = dispersePredator(bird);
+
+                w1 = bird.w1;
+                w2 = bird.w2;
+                w3 = bird.w3;
+                w4 = bird.w4;
+                w5 = bird.w5;
+                
+                bird.velocity = bird.velocity + w1*bird.v1 + w2*bird.v2 + w3*bird.v3 + w4*bird.wind + w5*bird.danger;
+                bird.velocity = boundPosition(bird); %contains perching
+                bird.velocity = limitVelocity(bird);
+                bird = perch(bird);
+                movement = zeros (2,3);
+                movement(1,:) = bird.position;
+                bird.position = bird.position + bird.velocity;
+                movement(2,:) = bird.position;
+                bird.distance = bird.distance + pdist(movement,'Euclidean');
+                bird.elevation = bird.elevation + abs(bird.velocity(3));
+                
+            else
+                bird = perch(bird);
+            end   
+        end
+        
+        function v1 = rule1(bird)
+            perceivedCentre = (bird.centreOfMass - bird.position)/(bird.birdNumber-1);
+            v1 = (perceivedCentre - bird.position)/(bird.factorRule1);  
+        end 
+        
+        function v2 = rule2(flock,bird)
+            others = vertcat(flock.position);
+            pos = bird.position;
+            distance = sqrt((others(:,1)-pos(1)).^2+(others(:,2)-pos(2)).^2+(others(:,3)-pos(3)).^2);    
+            tooClose = (distance<bird.factorRule2 & distance~=0);           
+            v2 = -[sum((others(:,1)-pos(1)).*tooClose),sum((others(:,2)-pos(2)).*tooClose),sum((others(:,3)-pos(3)).*tooClose)];  
+        end
+        
+        function v3 = rule3(bird)
+            perceivedVelocity = (bird.velocityCentre - bird.velocity)/(bird.birdNumber-1);
+            v3 = (perceivedVelocity - bird.velocity)/(bird.factorRule3);
+        end
+        
+        function wind = windy(bird) %helper subfunction
+            speedLimit = bird.speedLimit; %flock(1).speedLimit;
+            windStream = bird.wind;
+            windStream = windStream + ((rand(1,3) > 0.5)*2 - 1) * speedLimit/10 .* rand(1,3);
+            windSpeed = norm(windStream);
+            if windSpeed > speedLimit
+               windStream = (windStream/windSpeed)*speedLimit;
             end
+            wind = windStream;
         end
         
-        function obj = predator(obj)
-            obj.velocity = -(obj.position - obj.danger)/10;
+        function danger = dispersePredator(bird)
+            danger = 1./(bird.position-bird.predPos+10)./bird.factorDanger;
         end
         
-        function obj = windy(obj)
-%             windStream = wind + ((rand(1,3) > 0.5)*2 - 1) * speedLimit/8 .* rand(1,3);
-            windStream = obj{1}.wind;
-            windStream = windStream + ((rand(1,3) > 0.5)*2 - 1) * obj{1}.speedLimit/16 .* rand(1,3);
-            for b =1:obj{1}.amount
-                obj{b}.wind = windStream;
-            end
-        end
-        
-        function obj = draw(obj)
-            s  = obj{1}.geometry;
-            positions = vertcat(obj.position);
-            projection = positions;
-            projection(:,3) = 0;
-%             axes1 = axes('FontSize',10,'FontWeight','bold');
-%             xlim  (axes1,[0 obj{1}.geometry]);
-%             ylim  (axes1,[0 obj{1}.geometry]);
-%             zlim  (axes1,[0 obj{1}.geometry]);
-%             xlabel(axes1,'x (km)');
-%             ylabel(axes1,'T (K)');
-%             zlabel(axes1,'T (K)');
-%             box   (axes1,'on');
-%             grid  (axes1,'on');
-%             hold  (axes1,'all');
-            scatter3(positions(:,1),positions(:,2),positions(:,3),5,'filled');
-            set(gca,'XLim',[0 s],'YLim',[0 s],'ZLim',[0 s])
-            hold on
-            scatter3(projection(:,1),projection(:,2),projection(:,3),3,'filled','gr');
-        end
-        
-        function velocity = boundPosition(b)
+        function velocity = boundPosition(bird)
             
-           x = b.position(1);
-           y = b.position(2);
-           z = b.position(3);
+           x = bird.position(1);
+           y = bird.position(2);
+           z = bird.position(3);
            
-           velocity = b.velocity;
+           velocity = bird.velocity;
+           vx = velocity(1);
+           vy = velocity(2);
+           vz = velocity(3);
            
-           max = b.geometry - 50; %make space between border a property?
-           min = 50;
+           side = bird.dimNumber;
+           halfway = side/2; % to determine sign
            
-           if x < min
-               velocity(1) = 20; %another property
-           elseif x > max
-               velocity(1) = -20;
-           elseif y < min
-               velocity(2) = 20;
-           elseif y > max
-               velocity(2) = -20;
-           elseif z < min
-               velocity(3) = 20;
-           elseif z > max
-               velocity(3) = -20;
+           if x < halfway
+               steering = bird.bounding*((halfway-x)/bird.dimNumber)^2;
+               %steering = bird.bounding/(1+exp(-(halfway-x))); %bird.bounding^(halfway - x); %correct with weights
+               velocity(1) = vx + steering;
+           else
+               steering = bird.bounding*((halfway-x)/halfway)^2;
+               %steering = bird.bounding/(1+exp(+(halfway-x))); %correct with weights
+               velocity(1) = vx - steering;
+           end
+           
+           if y < halfway
+               steering = bird.bounding*((halfway-y)/bird.dimNumber)^2;
+               %steering = bird.bounding/(1+exp(-(halfway-y))); %correct with weights
+               velocity(2) = vy + steering;
+           else
+               steering = bird.bounding*((halfway-y)/bird.dimNumber)^2;
+               %steering = bird.bounding/(1+exp(+(halfway-y))); %correct with weights
+               velocity(2) = vy - steering;
+           end
+           
+           if z < halfway
+               steering = bird.bounding*((halfway-z)/bird.dimNumber)^2;
+               %steering = bird.bounding/(1+exp(-(halfway-z))); %correct with weights
+               velocity(3) = vz + steering;
+           else
+               steering = bird.bounding*((halfway-z)/bird.dimNumber)^2;
+               %steering = bird.bounding/(1+exp(+(halfway-z))); %correct with weights
+               velocity(3) = vz - steering;
            end
         end
         
-        function v = limitVelocity(b)
-            b.speed = norm(b.velocity);
-            if b.speed > b.speedLimit
-               v = (b.velocity/b.speed)*b.speedLimit;
+        function bird = perch(bird)
+           bird.perchTimer = bird.perchTimer - 1; 
+           if (~bird.perching) && (bird.perchTimer <= 0) && bird.position(3) < bird.groundLevel
+               bird.landing = bird.perchTimer;
+               bird.perching = true;
+               z = bird.position(3);
+               bird.velocity(3) = -z; %to make it hover above its projection
+           end 
+           if (bird.perching == true) && (bird.perchTimer == (bird.landing - 5))
+                bird.perchTimer = bird.timeToAct;
+                bird.velocity = [20 20 20];
+                bird.perching = false;
+           end
+        end
+        
+        function v = limitVelocity(bird)
+            speed = norm(bird.velocity);
+            if speed > bird.speedLimit
+               v = (bird.velocity/speed)*bird.speedLimit;
             else
-                v = b.velocity;
+                v = bird.velocity;
             end       
         end
-            
-        function obj = rule1(obj)
-            
-            obj = centreOfMass(obj);
-            
-            for b = 1:obj{1}.amount
-                obj{b}.v1 = (obj{b}.pc - obj{b}.position)/(obj{b}.factorRule1);
-            end
-            
-%             obj.pc = centreOfMass(obj);
-%             positions = vertcat(obj.position);
-%             obj.v1 = (pc - positions)/obj{1}.factorRule1;
-            
-        end
         
-        function obj = centreOfMass(obj)
-%             positions = vertcat(obj.position);
-%             c = sum(positions);
-            c = 0;
-            for b = 1:obj{1,1}.amount
-                c = c + obj{1,b}.position;
-            end
-            
-            % perceived centre of mass
-%             pc = zeros(obj{1}.amount,3);
-            for b = 1:obj{1}.amount
-                obj{b}.pc = (c - obj{b}.position)/(obj{b}.amount-1);
-                %display(obj{b}.pc)
-            end
-            
-            
-%             pc = pc/(obj{1}.amount-1); %make property?
-            
-%             x = positions(:,1);
-%             y = positions(:,2);
-%             z = positions(:,3);
-        end
-        
-        function obj = rule2(obj)
-            positions = zeros(2,3);
-            for b = 1:obj{1}.amount
-                positions(1,:) = obj{b}.position;
-                c = 0;
-                for i = 1:obj{1}.amount
-                    if i ~= b
-                        positions(2,:) = obj(i).position;
-                        space = pdist(positions,'Euclidean');
-                        if space < obj{b}.factorRule2 %some are bigger and other space? Make it property? 
-                            c = c - (positions(2,:) - positions(1,:)); 
-                        end
-                    end
-                end
-                obj{b}.v2 = c;
-            end
-        end
-        
-        function obj = rule3(obj)
-            obj = perceivedVelocity(obj);
-            for b = 1:obj{1}.amount
-                obj{b}.v3 = (obj{b}.pv - obj{b}.velocity)/(obj{b}.factorRule3);
-            end
-        end
-        
-        function obj = perceivedVelocity(obj)
-            c = 0;
-            for b = 1:obj{1}.amount
-                c = c + obj{b}.velocity;
-            end
-            
-%             velocities = vertcat(obj.velocity);
-%             c = sum(velocities);
-
-            for b = 1:obj{1}.amount
-                obj{b}.pv = (c - obj{b}.velocity)/(obj{b}.amount-1);
-            end
-        end
     end
 end
 
